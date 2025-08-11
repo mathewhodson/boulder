@@ -524,7 +524,7 @@ def test_highrisk_blocklist():
     fail with a policy error.
     """
 
-    # We include "example.org" in `test/hostname-policy.yaml` in the
+    # We include "example.org" in `test/ident-policy.yaml` in the
     # HighRiskBlockedNames list so issuing for "foo.example.org" should be
     # blocked.
     domain = "foo.example.org"
@@ -538,7 +538,7 @@ def test_wildcard_exactblacklist():
     should fail with a policy error.
     """
 
-    # We include "highrisk.le-test.hoffman-andrews.com" in `test/hostname-policy.yaml`
+    # We include "highrisk.le-test.hoffman-andrews.com" in `test/ident-policy.yaml`
     # Issuing for "*.le-test.hoffman-andrews.com" should be blocked
     domain = "*.le-test.hoffman-andrews.com"
     # We expect this to produce a policy problem
@@ -646,27 +646,6 @@ def test_order_reuse_failed_authz():
         order = client.poll_and_finalize(order)
     finally:
         cleanup()
-
-def test_order_finalize_early():
-    """
-    Test that finalizing an order before its fully authorized results in the
-    order having an error set and the status being invalid.
-    """
-    # Create a client
-    client = chisel2.make_client(None)
-
-    # Create a random domain and a csr
-    domains = [ random_domain() ]
-    csr_pem = chisel2.make_csr(domains)
-
-    # Create an order for the domain
-    order = client.new_order(csr_pem)
-
-    deadline = datetime.datetime.now() + datetime.timedelta(seconds=5)
-
-    # Finalizing an order early should generate an orderNotReady error.
-    chisel2.expect_problem("urn:ietf:params:acme:error:orderNotReady",
-        lambda: client.finalize_order(order, deadline))
 
 def test_only_return_existing_reg():
     client = chisel2.uninitialized_client()
@@ -976,7 +955,7 @@ def test_new_order_policy_errs():
     """
     client = chisel2.make_client(None)
 
-    # 'in-addr.arpa' is present in `test/hostname-policy.yaml`'s
+    # 'in-addr.arpa' is present in `test/ident-policy.yaml`'s
     # HighRiskBlockedNames list.
     csr_pem = chisel2.make_csr(["out-addr.in-addr.arpa", "between-addr.in-addr.arpa"])
 
@@ -1145,33 +1124,6 @@ def test_ocsp_exp_unauth():
         time.sleep(0.25)
     else:
         raise(Exception("timed out waiting for unauthorized OCSP response for expired certificate. Last error: {}".format(last_error)))
-
-def test_expiration_mailer():
-    # This test relies on contact addresses being persisted, which we no longer
-    # do in config-next.
-    if 'config-next' in os.environ['BOULDER_CONFIG_DIR']:
-        return
-
-    email_addr = "integration.%x@letsencrypt.org" % random.randrange(2**16)
-    order = chisel2.auth_and_issue([random_domain()], email=email_addr)
-    cert = parse_cert(order)
-    # Check that the expiration mailer sends a reminder
-    expiry = cert.not_valid_after_utc
-    no_reminder = expiry + datetime.timedelta(days=-31)
-    first_reminder = expiry + datetime.timedelta(days=-13)
-    last_reminder = expiry + datetime.timedelta(days=-2)
-
-    requests.post("http://localhost:9381/clear", data='')
-    for time in (no_reminder, first_reminder, last_reminder):
-        print(get_future_output(
-            ["./bin/boulder", "expiration-mailer",
-             "--config", "%s/expiration-mailer.json" % config_dir,
-             "--debug-addr", ":8008"],
-            time))
-    resp = requests.get("http://localhost:9381/count?to=%s" % email_addr)
-    mailcount = int(resp.text)
-    if mailcount != 2:
-        raise(Exception("\nExpiry mailer failed: expected 2 emails, got %d" % mailcount))
 
 def test_caa_good():
     domain = random_domain()

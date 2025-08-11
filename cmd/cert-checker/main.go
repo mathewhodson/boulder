@@ -38,8 +38,8 @@ import (
 	"github.com/letsencrypt/boulder/sa"
 )
 
-// For defense-in-depth in addition to using the PA & its hostnamePolicy to
-// check domain names we also perform a check against the regex's from the
+// For defense-in-depth in addition to using the PA & its identPolicy to check
+// domain names we also perform a check against the regex's from the
 // forbiddenDomains array
 var forbiddenDomainPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^\s*$`),
@@ -313,8 +313,8 @@ func (c *certChecker) checkValidations(ctx context.Context, cert *corepb.Certifi
 		return fmt.Errorf("no relevant authzs found valid at %s", cert.Issued)
 	}
 
-	// We may get multiple authorizations for the same name, but that's okay.
-	// Any authorization for a given name is sufficient.
+	// We may get multiple authorizations for the same identifier, but that's
+	// okay. Any authorization for a given identifier is sufficient.
 	identToAuthz := make(map[identifier.ACMEIdentifier]*corepb.Authorization)
 	for _, m := range authzs {
 		identToAuthz[identifier.FromProto(m.Identifier)] = m
@@ -612,7 +612,7 @@ func main() {
 	pa, err := policy.New(config.PA.Identifiers, config.PA.Challenges, logger)
 	cmd.FailOnError(err, "Failed to create PA")
 
-	err = pa.LoadHostnamePolicyFile(config.CertChecker.HostnamePolicyFile)
+	err = pa.LoadIdentPolicyFile(config.CertChecker.HostnamePolicyFile)
 	cmd.FailOnError(err, "Failed to load HostnamePolicyFile")
 
 	if config.CertChecker.CTLogListFile != "" {

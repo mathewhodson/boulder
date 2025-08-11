@@ -126,7 +126,6 @@ func initSA(t testing.TB) (*SQLStorageAuthority, clock.FakeClock, func()) {
 func createWorkingRegistration(t testing.TB, sa *SQLStorageAuthority) *corepb.Registration {
 	reg, err := sa.NewRegistration(context.Background(), &corepb.Registration{
 		Key:       []byte(theKey),
-		Contact:   []string{"mailto:foo@example.com"},
 		CreatedAt: mustTimestamp("2003-05-10 00:00"),
 		Status:    string(core.StatusValid),
 	})
@@ -188,23 +187,16 @@ func TestAddRegistration(t *testing.T) {
 	sa, clk, cleanUp := initSA(t)
 	defer cleanUp()
 
-	jwk := goodTestJWK()
-	jwkJSON, _ := jwk.MarshalJSON()
-
-	contacts := []string{"mailto:foo@example.com"}
+	jwkJSON, _ := goodTestJWK().MarshalJSON()
 	reg, err := sa.NewRegistration(ctx, &corepb.Registration{
-		Key:     jwkJSON,
-		Contact: contacts,
+		Key: jwkJSON,
 	})
 	if err != nil {
 		t.Fatalf("Couldn't create new registration: %s", err)
 	}
 	test.Assert(t, reg.Id != 0, "ID shouldn't be 0")
-	test.AssertDeepEquals(t, reg.Contact, contacts)
 
-	_, err = sa.GetRegistration(ctx, &sapb.RegistrationID{Id: 0})
-	test.AssertError(t, err, "Registration object for ID 0 was returned")
-
+	// Confirm that the registration can be retrieved by ID.
 	dbReg, err := sa.GetRegistration(ctx, &sapb.RegistrationID{Id: reg.Id})
 	test.AssertNotError(t, err, fmt.Sprintf("Couldn't get registration with ID %v", reg.Id))
 
@@ -213,27 +205,20 @@ func TestAddRegistration(t *testing.T) {
 	test.AssertByteEquals(t, dbReg.Key, jwkJSON)
 	test.AssertDeepEquals(t, dbReg.CreatedAt.AsTime(), createdAt)
 
-	regUpdate := &sapb.UpdateRegistrationContactRequest{
-		RegistrationID: reg.Id,
-		Contacts:       []string{"test.com"},
-	}
-	newReg, err := sa.UpdateRegistrationContact(ctx, regUpdate)
-	test.AssertNotError(t, err, fmt.Sprintf("Couldn't update registration with ID %v", reg.Id))
-	test.AssertEquals(t, dbReg.Id, newReg.Id)
-	test.AssertEquals(t, dbReg.Agreement, newReg.Agreement)
+	_, err = sa.GetRegistration(ctx, &sapb.RegistrationID{Id: 0})
+	test.AssertError(t, err, "Registration object for ID 0 was returned")
 
-	// Reconfirm that the updated registration was persisted to the database.
-	newReg, err = sa.GetRegistrationByKey(ctx, &sapb.JSONWebKey{Jwk: jwkJSON})
+	// Confirm that the registration can be retrieved by key.
+	dbReg, err = sa.GetRegistrationByKey(ctx, &sapb.JSONWebKey{Jwk: jwkJSON})
 	test.AssertNotError(t, err, "Couldn't get registration by key")
-	test.AssertEquals(t, dbReg.Id, newReg.Id)
-	test.AssertEquals(t, dbReg.Agreement, newReg.Agreement)
+	test.AssertEquals(t, dbReg.Id, dbReg.Id)
+	test.AssertEquals(t, dbReg.Agreement, dbReg.Agreement)
 
 	anotherKey := `{
 		"kty":"RSA",
 		"n": "vd7rZIoTLEe-z1_8G1FcXSw9CQFEJgV4g9V277sER7yx5Qjz_Pkf2YVth6wwwFJEmzc0hoKY-MMYFNwBE4hQHw",
 		"e":"AQAB"
 	}`
-
 	_, err = sa.GetRegistrationByKey(ctx, &sapb.JSONWebKey{Jwk: []byte(anotherKey)})
 	test.AssertError(t, err, "Registration object for invalid key was returned")
 }
@@ -265,8 +250,7 @@ func TestSelectRegistration(t *testing.T) {
 	test.AssertNotError(t, err, "couldn't parse jwk.Key")
 
 	reg, err := sa.NewRegistration(ctx, &corepb.Registration{
-		Key:     jwkJSON,
-		Contact: []string{"mailto:foo@example.com"},
+		Key: jwkJSON,
 	})
 	test.AssertNotError(t, err, fmt.Sprintf("couldn't create new registration: %s", err))
 	test.Assert(t, reg.Id != 0, "ID shouldn't be 0")
@@ -895,7 +879,6 @@ func TestDeactivateAccount(t *testing.T) {
 	test.AssertNotError(t, err, "DeactivateRegistration failed")
 	test.AssertEquals(t, got.Id, reg.Id)
 	test.AssertEquals(t, core.AcmeStatus(got.Status), core.StatusDeactivated)
-	test.AssertEquals(t, len(got.Contact), 0)
 
 	// Double-check that the DeactivateRegistration method returned the right
 	// thing, by fetching the same account ourselves.
@@ -903,7 +886,6 @@ func TestDeactivateAccount(t *testing.T) {
 	test.AssertNotError(t, err, "GetRegistration failed")
 	test.AssertEquals(t, got.Id, reg.Id)
 	test.AssertEquals(t, core.AcmeStatus(got.Status), core.StatusDeactivated)
-	test.AssertEquals(t, len(got.Contact), 0)
 
 	// Attempting to deactivate it a second time should fail, since it is already
 	// deactivated.
@@ -2650,6 +2632,36 @@ func TestGetValidAuthorizations2(t *testing.T) {
 		aaa = am.ID
 	}
 
+	var dac int64
+	{
+		tokenStr := core.NewToken()
+		token, err := base64.RawURLEncoding.DecodeString(tokenStr)
+		test.AssertNotError(t, err, "computing test authorization challenge token")
+
+		profile := "test"
+		attempted := challTypeToUint[string(core.ChallengeTypeDNSAccount01)]
+		attemptedAt := fc.Now()
+		vr, _ := json.Marshal([]core.ValidationRecord{})
+
+		am := authzModel{
+			IdentifierType:         identifierTypeToUint[string(identifier.TypeDNS)],
+			IdentifierValue:        "aaa",
+			RegistrationID:         3,
+			CertificateProfileName: &profile,
+			Status:                 statusToUint[core.StatusValid],
+			Expires:                fc.Now().Add(24 * time.Hour),
+			Challenges:             1 << challTypeToUint[string(core.ChallengeTypeDNSAccount01)],
+			Attempted:              &attempted,
+			AttemptedAt:            &attemptedAt,
+			Token:                  token,
+			ValidationError:        nil,
+			ValidationRecord:       vr,
+		}
+		err = sa.dbMap.Insert(context.Background(), &am)
+		test.AssertNotError(t, err, "failed to insert valid authz with dns-account-01")
+		dac = am.ID
+	}
+
 	for _, tc := range []struct {
 		name        string
 		regID       int64
@@ -2665,6 +2677,14 @@ func TestGetValidAuthorizations2(t *testing.T) {
 			profile:     "test",
 			validUntil:  fc.Now().Add(time.Hour),
 			wantIDs:     []int64{aaa},
+		},
+		{
+			name:        "happy path, dns-account-01 challenge",
+			regID:       3,
+			identifiers: []*corepb.Identifier{identifier.NewDNS("aaa").ToProto()},
+			profile:     "test",
+			validUntil:  fc.Now().Add(time.Hour),
+			wantIDs:     []int64{dac},
 		},
 		{
 			name:        "different identifier type",
@@ -4503,74 +4523,6 @@ func newAcctKey(t *testing.T) []byte {
 	return acctKey
 }
 
-func TestUpdateRegistrationContact(t *testing.T) {
-	sa, _, cleanUp := initSA(t)
-	defer cleanUp()
-
-	noContact, _ := json.Marshal("")
-	exampleContact, _ := json.Marshal("test@example.com")
-	twoExampleContacts, _ := json.Marshal([]string{"test1@example.com", "test2@example.com"})
-
-	_, err := sa.UpdateRegistrationContact(ctx, &sapb.UpdateRegistrationContactRequest{})
-	test.AssertError(t, err, "should not have been able to update registration contact without a registration ID")
-	test.AssertContains(t, err.Error(), "incomplete gRPC request message")
-
-	tests := []struct {
-		name            string
-		oldContactsJSON []string
-		newContacts     []string
-	}{
-		{
-			name:            "update a valid registration from no contacts to one email address",
-			oldContactsJSON: []string{string(noContact)},
-			newContacts:     []string{"mailto:test@example.com"},
-		},
-		{
-			name:            "update a valid registration from no contacts to two email addresses",
-			oldContactsJSON: []string{string(noContact)},
-			newContacts:     []string{"mailto:test1@example.com", "mailto:test2@example.com"},
-		},
-		{
-			name:            "update a valid registration from one email address to no contacts",
-			oldContactsJSON: []string{string(exampleContact)},
-			newContacts:     []string{},
-		},
-		{
-			name:            "update a valid registration from one email address to two email addresses",
-			oldContactsJSON: []string{string(exampleContact)},
-			newContacts:     []string{"mailto:test1@example.com", "mailto:test2@example.com"},
-		},
-		{
-			name:            "update a valid registration from two email addresses to no contacts",
-			oldContactsJSON: []string{string(twoExampleContacts)},
-			newContacts:     []string{},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reg, err := sa.NewRegistration(ctx, &corepb.Registration{
-				Contact: tt.oldContactsJSON,
-				Key:     newAcctKey(t),
-			})
-			test.AssertNotError(t, err, "creating new registration")
-
-			updatedReg, err := sa.UpdateRegistrationContact(ctx, &sapb.UpdateRegistrationContactRequest{
-				RegistrationID: reg.Id,
-				Contacts:       tt.newContacts,
-			})
-			test.AssertNotError(t, err, "unexpected error for UpdateRegistrationContact()")
-			test.AssertEquals(t, updatedReg.Id, reg.Id)
-			test.AssertDeepEquals(t, updatedReg.Contact, tt.newContacts)
-
-			refetchedReg, err := sa.GetRegistration(ctx, &sapb.RegistrationID{
-				Id: reg.Id,
-			})
-			test.AssertNotError(t, err, "retrieving registration")
-			test.AssertDeepEquals(t, refetchedReg.Contact, tt.newContacts)
-		})
-	}
-}
-
 func TestUpdateRegistrationKey(t *testing.T) {
 	sa, _, cleanUp := initSA(t)
 	defer cleanUp()
@@ -4635,7 +4587,7 @@ func TestUpdateRegistrationKey(t *testing.T) {
 
 type mockRLOStream struct {
 	grpc.ServerStream
-	sent []*sapb.RateLimitOverride
+	sent []*sapb.RateLimitOverrideResponse
 	ctx  context.Context
 }
 
@@ -4644,7 +4596,7 @@ func newMockRLOStream() *mockRLOStream {
 }
 func (m *mockRLOStream) Context() context.Context { return m.ctx }
 func (m *mockRLOStream) RecvMsg(any) error        { return io.EOF }
-func (m *mockRLOStream) Send(ov *sapb.RateLimitOverride) error {
+func (m *mockRLOStream) Send(ov *sapb.RateLimitOverrideResponse) error {
 	m.sent = append(m.sent, ov)
 	return nil
 }
@@ -4778,5 +4730,5 @@ func TestGetEnabledRateLimitOverrides(t *testing.T) {
 	err = sa.GetEnabledRateLimitOverrides(&emptypb.Empty{}, stream)
 	test.AssertNotError(t, err, "expected streaming enabled overrides to succeed, got error")
 	test.AssertEquals(t, len(stream.sent), 1)
-	test.AssertEquals(t, stream.sent[0].BucketKey, "on")
+	test.AssertEquals(t, stream.sent[0].Override.BucketKey, "on")
 }

@@ -37,7 +37,7 @@ func TestRecordSanityCheckOnUnsupportedChallengeType(t *testing.T) {
 	rec := []ValidationRecord{
 		{
 			URL:               "http://localhost/test",
-			DnsName:           "localhost",
+			Hostname:          "localhost",
 			Port:              "80",
 			AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
 			AddressUsed:       netip.MustParseAddr("127.0.0.1"),
@@ -59,7 +59,7 @@ func TestChallengeSanityCheck(t *testing.T) {
   }`), &accountKey)
 	test.AssertNotError(t, err, "Error unmarshaling JWK")
 
-	types := []AcmeChallenge{ChallengeTypeHTTP01, ChallengeTypeDNS01, ChallengeTypeTLSALPN01}
+	types := []AcmeChallenge{ChallengeTypeHTTP01, ChallengeTypeDNS01, ChallengeTypeTLSALPN01, ChallengeTypeDNSAccount01}
 	for _, challengeType := range types {
 		chall := Challenge{
 			Type:   challengeType,
@@ -152,6 +152,8 @@ func TestChallengeStringID(t *testing.T) {
 	test.AssertEquals(t, ch.StringID(), "iFVMwA")
 	ch.Type = ChallengeTypeHTTP01
 	test.AssertEquals(t, ch.StringID(), "0Gexug")
+	ch.Type = ChallengeTypeDNSAccount01
+	test.AssertEquals(t, ch.StringID(), "8z2wSg")
 }
 
 func TestFindChallengeByType(t *testing.T) {

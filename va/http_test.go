@@ -62,7 +62,7 @@ type dnsMockReturnsUnroutable struct {
 }
 
 func (mock dnsMockReturnsUnroutable) LookupHost(_ context.Context, hostname string) ([]netip.Addr, bdns.ResolverAddrs, error) {
-	return []netip.Addr{netip.MustParseAddr("198.51.100.1")}, bdns.ResolverAddrs{"dnsMockReturnsUnroutable"}, nil
+	return []netip.Addr{netip.MustParseAddr("64.112.117.254")}, bdns.ResolverAddrs{"dnsMockReturnsUnroutable"}, nil
 }
 
 // TestDialerTimeout tests that the preresolvedDialer's DialContext
@@ -318,7 +318,7 @@ func TestExtractRequestTarget(t *testing.T) {
 				URL: mustURL("http://10.10.10.10"),
 			},
 			ExpectedError: fmt.Errorf("Invalid host in redirect target: " +
-				"IP address is in a reserved address block: RFC 1918: Private-Use"),
+				"IP address is in a reserved address block: [RFC1918]: Private-Use"),
 		},
 		{
 			Name: "bare IPv6, implicit port",
@@ -358,7 +358,15 @@ func TestExtractRequestTarget(t *testing.T) {
 				URL: mustURL("http://[3fff:aaa:aaaa:aaaa:abad:0ff1:cec0:ffee]"),
 			},
 			ExpectedError: fmt.Errorf("Invalid host in redirect target: " +
-				"IP address is in a reserved address block: RFC 9637: Documentation"),
+				"IP address is in a reserved address block: [RFC9637]: Documentation"),
+		},
+		{
+			Name: "bare IPv6, scope zone",
+			Req: &http.Request{
+				URL: mustURL("http://[::1%25lo]"),
+			},
+			ExpectedError: fmt.Errorf("Invalid host in redirect target: " +
+				"contains scope zone"),
 		},
 		{
 			Name: "valid HTTP redirect, explicit port",
@@ -517,9 +525,9 @@ func TestSetupHTTPValidation(t *testing.T) {
 				path: "idk",
 			},
 			ExpectedRecord: core.ValidationRecord{
-				URL:     "http://ipv4.and.ipv6.localhost/yellow/brick/road",
-				DnsName: "ipv4.and.ipv6.localhost",
-				Port:    strconv.Itoa(va.httpPort),
+				URL:      "http://ipv4.and.ipv6.localhost/yellow/brick/road",
+				Hostname: "ipv4.and.ipv6.localhost",
+				Port:     strconv.Itoa(va.httpPort),
 			},
 			ExpectedError: fmt.Errorf(`host "ipv4.and.ipv6.localhost" has no IP addresses remaining to use`),
 		},
@@ -528,7 +536,7 @@ func TestSetupHTTPValidation(t *testing.T) {
 			InputTarget: mustTarget(t, "ipv4.and.ipv6.localhost", va.httpPort, "/yellow/brick/road"),
 			InputURL:    httpInputURL,
 			ExpectedRecord: core.ValidationRecord{
-				DnsName:           "ipv4.and.ipv6.localhost",
+				Hostname:          "ipv4.and.ipv6.localhost",
 				Port:              strconv.Itoa(va.httpPort),
 				URL:               "http://ipv4.and.ipv6.localhost/yellow/brick/road",
 				AddressesResolved: []netip.Addr{netip.MustParseAddr("::1"), netip.MustParseAddr("127.0.0.1")},
@@ -546,7 +554,7 @@ func TestSetupHTTPValidation(t *testing.T) {
 			InputTarget: mustTarget(t, "ipv4.and.ipv6.localhost", va.httpsPort, "/yellow/brick/road"),
 			InputURL:    httpsInputURL,
 			ExpectedRecord: core.ValidationRecord{
-				DnsName:           "ipv4.and.ipv6.localhost",
+				Hostname:          "ipv4.and.ipv6.localhost",
 				Port:              strconv.Itoa(va.httpsPort),
 				URL:               "https://ipv4.and.ipv6.localhost/yellow/brick/road",
 				AddressesResolved: []netip.Addr{netip.MustParseAddr("::1"), netip.MustParseAddr("127.0.0.1")},
@@ -883,7 +891,7 @@ func TestFetchHTTP(t *testing.T) {
 		}
 		expectedLoopRecords = append(expectedLoopRecords,
 			core.ValidationRecord{
-				DnsName:           "example.com",
+				Hostname:          "example.com",
 				Port:              strconv.Itoa(httpPortIPv4),
 				URL:               url,
 				AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -904,7 +912,7 @@ func TestFetchHTTP(t *testing.T) {
 		}
 		expectedTooManyRedirRecords = append(expectedTooManyRedirRecords,
 			core.ValidationRecord{
-				DnsName:           "example.com",
+				Hostname:          "example.com",
 				Port:              strconv.Itoa(httpPortIPv4),
 				URL:               url,
 				AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -946,7 +954,7 @@ func TestFetchHTTP(t *testing.T) {
 					"Timeout after connect (your server may be slow or overloaded)"),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/timeout",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -981,7 +989,7 @@ func TestFetchHTTP(t *testing.T) {
 					`are supported, not "gopher"`),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/redir-bad-proto",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -999,7 +1007,7 @@ func TestFetchHTTP(t *testing.T) {
 					"Only ports %d and 443 are supported, not 1987", httpPortIPv4)),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/redir-bad-port",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1015,7 +1023,7 @@ func TestFetchHTTP(t *testing.T) {
 			ExpectedBody: "ok",
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/redir-bare-ipv4",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1023,7 +1031,7 @@ func TestFetchHTTP(t *testing.T) {
 					ResolverAddrs:     []string{"MockClient"},
 				},
 				{
-					DnsName:           "127.0.0.1",
+					Hostname:          "127.0.0.1",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://127.0.0.1/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1038,7 +1046,7 @@ func TestFetchHTTP(t *testing.T) {
 			ExpectedBody: "ok",
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "ipv6.localhost",
+					Hostname:          "ipv6.localhost",
 					Port:              strconv.Itoa(httpPortIPv6),
 					URL:               "http://ipv6.localhost/redir-bare-ipv6",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("::1")},
@@ -1046,7 +1054,7 @@ func TestFetchHTTP(t *testing.T) {
 					ResolverAddrs:     []string{"MockClient"},
 				},
 				{
-					DnsName:           "::1",
+					Hostname:          "::1",
 					Port:              strconv.Itoa(httpPortIPv6),
 					URL:               "http://[::1]/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("::1")},
@@ -1062,7 +1070,7 @@ func TestFetchHTTP(t *testing.T) {
 				"127.0.0.1: Fetching https://example.com/this-is-too-long-01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789: Redirect target too long"),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/redir-path-too-long",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1079,7 +1087,7 @@ func TestFetchHTTP(t *testing.T) {
 				"127.0.0.1: Invalid response from http://example.com/bad-status-code: 410"),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/bad-status-code",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1096,7 +1104,7 @@ func TestFetchHTTP(t *testing.T) {
 				"127.0.0.1: Fetching http://example.org/303-see-other: received disallowed redirect status code"),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/303-see-other",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1114,7 +1122,7 @@ func TestFetchHTTP(t *testing.T) {
 			)),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/resp-too-big",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1131,7 +1139,7 @@ func TestFetchHTTP(t *testing.T) {
 				"::1: Fetching http://ipv6.localhost/ok: Connection refused"),
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "ipv6.localhost",
+					Hostname:          "ipv6.localhost",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://ipv6.localhost/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("::1")},
@@ -1147,7 +1155,7 @@ func TestFetchHTTP(t *testing.T) {
 			ExpectedBody: "ok",
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "ipv4.and.ipv6.localhost",
+					Hostname:          "ipv4.and.ipv6.localhost",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://ipv4.and.ipv6.localhost/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("::1"), netip.MustParseAddr("127.0.0.1")},
@@ -1156,7 +1164,7 @@ func TestFetchHTTP(t *testing.T) {
 					ResolverAddrs: []string{"MockClient"},
 				},
 				{
-					DnsName:           "ipv4.and.ipv6.localhost",
+					Hostname:          "ipv4.and.ipv6.localhost",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://ipv4.and.ipv6.localhost/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("::1"), netip.MustParseAddr("127.0.0.1")},
@@ -1173,7 +1181,7 @@ func TestFetchHTTP(t *testing.T) {
 			ExpectedBody: "ok",
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1189,7 +1197,7 @@ func TestFetchHTTP(t *testing.T) {
 			ExpectedBody: "ok",
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/redir-uppercase-publicsuffix",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1197,7 +1205,7 @@ func TestFetchHTTP(t *testing.T) {
 					ResolverAddrs:     []string{"MockClient"},
 				},
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/ok",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},
@@ -1218,7 +1226,7 @@ func TestFetchHTTP(t *testing.T) {
 			},
 			ExpectedRecords: []core.ValidationRecord{
 				{
-					DnsName:           "example.com",
+					Hostname:          "example.com",
 					Port:              strconv.Itoa(httpPortIPv4),
 					URL:               "http://example.com/printf-verbs",
 					AddressesResolved: []netip.Addr{netip.MustParseAddr("127.0.0.1")},

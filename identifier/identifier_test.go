@@ -8,120 +8,36 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-
-	corepb "github.com/letsencrypt/boulder/core/proto"
 )
 
-type withDefaultTestCases struct {
-	Name        string
-	InputIdents []*corepb.Identifier
-	InputNames  []string
-	want        ACMEIdentifiers
-}
-
-func (tc withDefaultTestCases) GetIdentifiers() []*corepb.Identifier {
-	return tc.InputIdents
-}
-
-func (tc withDefaultTestCases) GetDnsNames() []string {
-	return tc.InputNames
-}
-
-func TestFromProtoSliceWithDefault(t *testing.T) {
-	testCases := []withDefaultTestCases{
+func TestNewIP(t *testing.T) {
+	cases := []struct {
+		name string
+		ip   netip.Addr
+		want ACMEIdentifier
+	}{
 		{
-			Name: "Populated identifiers, populated names, same values",
-			InputIdents: []*corepb.Identifier{
-				{Type: "dns", Value: "a.example.com"},
-				{Type: "dns", Value: "b.example.com"},
-			},
-			InputNames: []string{"a.example.com", "b.example.com"},
-			want: ACMEIdentifiers{
-				{Type: TypeDNS, Value: "a.example.com"},
-				{Type: TypeDNS, Value: "b.example.com"},
-			},
+			name: "IPv4 address",
+			ip:   netip.MustParseAddr("9.9.9.9"),
+			want: ACMEIdentifier{Type: TypeIP, Value: "9.9.9.9"},
 		},
 		{
-			Name: "Populated identifiers, populated names, different values",
-			InputIdents: []*corepb.Identifier{
-				{Type: "dns", Value: "coffee.example.com"},
-			},
-			InputNames: []string{"tea.example.com"},
-			want: ACMEIdentifiers{
-				{Type: TypeDNS, Value: "coffee.example.com"},
-			},
+			name: "IPv6 address",
+			ip:   netip.MustParseAddr("fe80::cafe"),
+			want: ACMEIdentifier{Type: TypeIP, Value: "fe80::cafe"},
 		},
 		{
-			Name: "Populated identifiers, empty names",
-			InputIdents: []*corepb.Identifier{
-				{Type: "dns", Value: "example.com"},
-			},
-			InputNames: []string{},
-			want: ACMEIdentifiers{
-				{Type: TypeDNS, Value: "example.com"},
-			},
-		},
-		{
-			Name: "Populated identifiers, nil names",
-			InputIdents: []*corepb.Identifier{
-				{Type: "dns", Value: "example.com"},
-			},
-			InputNames: nil,
-			want: ACMEIdentifiers{
-				{Type: TypeDNS, Value: "example.com"},
-			},
-		},
-		{
-			Name:        "Empty identifiers, populated names",
-			InputIdents: []*corepb.Identifier{},
-			InputNames:  []string{"a.example.com", "b.example.com"},
-			want: ACMEIdentifiers{
-				{Type: TypeDNS, Value: "a.example.com"},
-				{Type: TypeDNS, Value: "b.example.com"},
-			},
-		},
-		{
-			Name:        "Empty identifiers, empty names",
-			InputIdents: []*corepb.Identifier{},
-			InputNames:  []string{},
-			want:        nil,
-		},
-		{
-			Name:        "Empty identifiers, nil names",
-			InputIdents: []*corepb.Identifier{},
-			InputNames:  nil,
-			want:        nil,
-		},
-		{
-			Name:        "Nil identifiers, populated names",
-			InputIdents: nil,
-			InputNames:  []string{"a.example.com", "b.example.com"},
-			want: ACMEIdentifiers{
-				{Type: TypeDNS, Value: "a.example.com"},
-				{Type: TypeDNS, Value: "b.example.com"},
-			},
-		},
-		{
-			Name:        "Nil identifiers, empty names",
-			InputIdents: nil,
-			InputNames:  []string{},
-			want:        nil,
-		},
-		{
-			Name:        "Nil identifiers, nil names",
-			InputIdents: nil,
-			InputNames:  nil,
-			want:        nil,
+			name: "IPv6 address with scope zone",
+			ip:   netip.MustParseAddr("fe80::cafe%lo"),
+			want: ACMEIdentifier{Type: TypeIP, Value: "fe80::cafe"},
 		},
 	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			got := FromProtoSliceWithDefault(tc)
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("Got %#v, but want %#v", got, tc.want)
+			got := NewIP(tc.ip)
+			if got != tc.want {
+				t.Errorf("NewIP(%#v) = %#v, but want %#v", tc.ip, got, tc.want)
 			}
 		})
 	}

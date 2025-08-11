@@ -104,13 +104,13 @@ func (d *Decision) Result(now time.Time) error {
 
 	// There is no case for FailedAuthorizationsForPausingPerDomainPerAccount
 	// because the RA will pause clients who exceed that ratelimit.
-	switch d.transaction.limit.name {
+	switch d.transaction.limit.Name {
 	case NewRegistrationsPerIPAddress:
 		return berrors.RegistrationsPerIPAddressError(
 			retryAfter,
 			"too many new registrations (%d) from this IP address in the last %s, retry after %s",
-			d.transaction.limit.burst,
-			d.transaction.limit.period.Duration,
+			d.transaction.limit.Burst,
+			d.transaction.limit.Period.Duration,
 			retryAfterTs,
 		)
 
@@ -118,57 +118,57 @@ func (d *Decision) Result(now time.Time) error {
 		return berrors.RegistrationsPerIPv6RangeError(
 			retryAfter,
 			"too many new registrations (%d) from this /48 subnet of IPv6 addresses in the last %s, retry after %s",
-			d.transaction.limit.burst,
-			d.transaction.limit.period.Duration,
+			d.transaction.limit.Burst,
+			d.transaction.limit.Period.Duration,
 			retryAfterTs,
 		)
 	case NewOrdersPerAccount:
 		return berrors.NewOrdersPerAccountError(
 			retryAfter,
 			"too many new orders (%d) from this account in the last %s, retry after %s",
-			d.transaction.limit.burst,
-			d.transaction.limit.period.Duration,
+			d.transaction.limit.Burst,
+			d.transaction.limit.Period.Duration,
 			retryAfterTs,
 		)
 
 	case FailedAuthorizationsPerDomainPerAccount:
-		// Uses bucket key 'enum:regId:domain'.
+		// Uses bucket key 'enum:regId:identValue'.
 		idx := strings.LastIndex(d.transaction.bucketKey, ":")
 		if idx == -1 {
 			return berrors.InternalServerError("unrecognized bucket key while generating error")
 		}
-		domain := d.transaction.bucketKey[idx+1:]
+		identValue := d.transaction.bucketKey[idx+1:]
 		return berrors.FailedAuthorizationsPerDomainPerAccountError(
 			retryAfter,
 			"too many failed authorizations (%d) for %q in the last %s, retry after %s",
-			d.transaction.limit.burst,
-			domain,
-			d.transaction.limit.period.Duration,
+			d.transaction.limit.Burst,
+			identValue,
+			d.transaction.limit.Period.Duration,
 			retryAfterTs,
 		)
 
 	case CertificatesPerDomain, CertificatesPerDomainPerAccount:
-		// Uses bucket key 'enum:domain' or 'enum:regId:domain' respectively.
+		// Uses bucket key 'enum:domainOrCIDR' or 'enum:regId:domainOrCIDR' respectively.
 		idx := strings.LastIndex(d.transaction.bucketKey, ":")
 		if idx == -1 {
 			return berrors.InternalServerError("unrecognized bucket key while generating error")
 		}
-		domain := d.transaction.bucketKey[idx+1:]
+		domainOrCIDR := d.transaction.bucketKey[idx+1:]
 		return berrors.CertificatesPerDomainError(
 			retryAfter,
 			"too many certificates (%d) already issued for %q in the last %s, retry after %s",
-			d.transaction.limit.burst,
-			domain,
-			d.transaction.limit.period.Duration,
+			d.transaction.limit.Burst,
+			domainOrCIDR,
+			d.transaction.limit.Period.Duration,
 			retryAfterTs,
 		)
 
 	case CertificatesPerFQDNSet:
 		return berrors.CertificatesPerFQDNSetError(
 			retryAfter,
-			"too many certificates (%d) already issued for this exact set of domains in the last %s, retry after %s",
-			d.transaction.limit.burst,
-			d.transaction.limit.period.Duration,
+			"too many certificates (%d) already issued for this exact set of identifiers in the last %s, retry after %s",
+			d.transaction.limit.Burst,
+			d.transaction.limit.Period.Duration,
 			retryAfterTs,
 		)
 
@@ -346,7 +346,7 @@ func (l *Limiter) BatchSpend(ctx context.Context, txns []Transaction) (*Decision
 	totalLatency := l.clk.Since(start)
 	perTxnLatency := totalLatency / time.Duration(len(txnOutcomes))
 	for txn, outcome := range txnOutcomes {
-		l.spendLatency.WithLabelValues(txn.limit.name.String(), outcome).Observe(perTxnLatency.Seconds())
+		l.spendLatency.WithLabelValues(txn.limit.Name.String(), outcome).Observe(perTxnLatency.Seconds())
 	}
 	return batchDecision, nil
 }

@@ -15,19 +15,22 @@ import (
 
 func TestDuplicateFQDNRateLimit(t *testing.T) {
 	t.Parallel()
-	idents := []acme.Identifier{{Type: "dns", Value: random_domain()}}
+	idents := []acme.Identifier{
+		{Type: "dns", Value: random_domain()},
+		{Type: "ip", Value: "64.112.117.122"},
+	}
 
 	// The global rate limit for a duplicate certificates is 2 per 3 hours.
-	_, err := authAndIssue(nil, nil, idents, true, "")
+	_, err := authAndIssue(nil, nil, idents, true, "shortlived")
 	test.AssertNotError(t, err, "Failed to issue first certificate")
 
-	_, err = authAndIssue(nil, nil, idents, true, "")
+	_, err = authAndIssue(nil, nil, idents, true, "shortlived")
 	test.AssertNotError(t, err, "Failed to issue second certificate")
 
-	_, err = authAndIssue(nil, nil, idents, true, "")
+	_, err = authAndIssue(nil, nil, idents, true, "shortlived")
 	test.AssertError(t, err, "Somehow managed to issue third certificate")
 
-	test.AssertContains(t, err.Error(), "too many certificates (2) already issued for this exact set of domains in the last 3h0m0s")
+	test.AssertContains(t, err.Error(), "too many certificates (2) already issued for this exact set of identifiers in the last 3h0m0s")
 }
 
 func TestCertificatesPerDomain(t *testing.T) {

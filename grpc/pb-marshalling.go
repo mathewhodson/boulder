@@ -141,7 +141,7 @@ func ValidationRecordToPB(record core.ValidationRecord) (*corepb.ValidationRecor
 		return nil, err
 	}
 	return &corepb.ValidationRecord{
-		Hostname:          record.DnsName,
+		Hostname:          record.Hostname,
 		Port:              record.Port,
 		AddressesResolved: addrs,
 		AddressUsed:       addrUsed,
@@ -177,7 +177,7 @@ func PBToValidationRecord(in *corepb.ValidationRecord) (record core.ValidationRe
 		return
 	}
 	return core.ValidationRecord{
-		DnsName:           in.Hostname,
+		Hostname:          in.Hostname,
 		Port:              in.Port,
 		AddressesResolved: addrs,
 		AddressUsed:       addrUsed,
@@ -232,10 +232,6 @@ func RegistrationToPB(reg core.Registration) (*corepb.Registration, error) {
 	if err != nil {
 		return nil, err
 	}
-	var contacts []string
-	if reg.Contact != nil {
-		contacts = *reg.Contact
-	}
 	var createdAt *timestamppb.Timestamp
 	if reg.CreatedAt != nil {
 		createdAt = timestamppb.New(reg.CreatedAt.UTC())
@@ -247,7 +243,6 @@ func RegistrationToPB(reg core.Registration) (*corepb.Registration, error) {
 	return &corepb.Registration{
 		Id:        reg.ID,
 		Key:       keyBytes,
-		Contact:   contacts,
 		Agreement: reg.Agreement,
 		CreatedAt: createdAt,
 		Status:    string(reg.Status),
@@ -265,14 +260,9 @@ func PbToRegistration(pb *corepb.Registration) (core.Registration, error) {
 		c := pb.CreatedAt.AsTime()
 		createdAt = &c
 	}
-	var contacts *[]string
-	if len(pb.Contact) != 0 {
-		contacts = &pb.Contact
-	}
 	return core.Registration{
 		ID:        pb.Id,
 		Key:       &key,
-		Contact:   contacts,
 		Agreement: pb.Agreement,
 		CreatedAt: createdAt,
 		Status:    core.AcmeStatus(pb.Status),
@@ -351,8 +341,8 @@ func newOrderValid(order *corepb.Order) bool {
 	return !(order.RegistrationID == 0 || order.Expires == nil || len(order.Identifiers) == 0)
 }
 
-// PBToAuthzMap converts a protobuf map of domains mapped to protobuf authorizations to a
-// golang map[string]*core.Authorization.
+// PBToAuthzMap converts a protobuf map of identifiers mapped to protobuf
+// authorizations to a golang map[string]*core.Authorization.
 func PBToAuthzMap(pb *sapb.Authorizations) (map[identifier.ACMEIdentifier]*core.Authorization, error) {
 	m := make(map[identifier.ACMEIdentifier]*core.Authorization, len(pb.Authzs))
 	for _, v := range pb.Authzs {

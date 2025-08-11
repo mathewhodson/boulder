@@ -111,9 +111,6 @@ type RegistrationAuthorityImpl struct {
 	// TODO(#8177): Remove once the rate of requests failing to finalize due to
 	// requesting Must-Staple has diminished.
 	mustStapleRequestsCounter *prometheus.CounterVec
-	// TODO(#7966): Remove once the rate of registrations with contacts has been
-	// determined.
-	newOrUpdatedContactCounter *prometheus.CounterVec
 }
 
 var _ rapb.RegistrationAuthorityServer = (*RegistrationAuthorityImpl)(nil)
@@ -230,45 +227,36 @@ func NewRegistrationAuthorityImpl(
 	}, []string{"allowlist"})
 	stats.MustRegister(mustStapleRequestsCounter)
 
-	// TODO(#7966): Remove once the rate of registrations with contacts has been
-	// determined.
-	newOrUpdatedContactCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "new_or_updated_contact",
-		Help: "A counter of new or updated contacts, labeled by new=[bool]",
-	}, []string{"new"})
-	stats.MustRegister(newOrUpdatedContactCounter)
-
 	issuersByNameID := make(map[issuance.NameID]*issuance.Certificate)
 	for _, issuer := range issuers {
 		issuersByNameID[issuer.NameID()] = issuer
 	}
 
 	ra := &RegistrationAuthorityImpl{
-		clk:                        clk,
-		log:                        logger,
-		profiles:                   profiles,
-		maxContactsPerReg:          maxContactsPerReg,
-		keyPolicy:                  keyPolicy,
-		limiter:                    limiter,
-		txnBuilder:                 txnBuilder,
-		publisher:                  pubc,
-		finalizeTimeout:            finalizeTimeout,
-		ctpolicy:                   ctp,
-		ctpolicyResults:            ctpolicyResults,
-		purger:                     purger,
-		issuersByNameID:            issuersByNameID,
-		namesPerCert:               namesPerCert,
-		newRegCounter:              newRegCounter,
-		recheckCAACounter:          recheckCAACounter,
-		newCertCounter:             newCertCounter,
-		revocationReasonCounter:    revocationReasonCounter,
-		authzAges:                  authzAges,
-		orderAges:                  orderAges,
-		inflightFinalizes:          inflightFinalizes,
-		certCSRMismatch:            certCSRMismatch,
-		pauseCounter:               pauseCounter,
-		mustStapleRequestsCounter:  mustStapleRequestsCounter,
-		newOrUpdatedContactCounter: newOrUpdatedContactCounter,
+		clk:                       clk,
+		log:                       logger,
+		profiles:                  profiles,
+		maxContactsPerReg:         maxContactsPerReg,
+		keyPolicy:                 keyPolicy,
+		limiter:                   limiter,
+		txnBuilder:                txnBuilder,
+		publisher:                 pubc,
+		finalizeTimeout:           finalizeTimeout,
+		ctpolicy:                  ctp,
+		ctpolicyResults:           ctpolicyResults,
+		purger:                    purger,
+		issuersByNameID:           issuersByNameID,
+		namesPerCert:              namesPerCert,
+		newRegCounter:             newRegCounter,
+		recheckCAACounter:         recheckCAACounter,
+		newCertCounter:            newCertCounter,
+		revocationReasonCounter:   revocationReasonCounter,
+		authzAges:                 authzAges,
+		orderAges:                 orderAges,
+		inflightFinalizes:         inflightFinalizes,
+		certCSRMismatch:           certCSRMismatch,
+		pauseCounter:              pauseCounter,
+		mustStapleRequestsCounter: mustStapleRequestsCounter,
 	}
 	return ra
 }
@@ -303,8 +291,8 @@ type ValidationProfileConfig struct {
 	// exists but is empty, the profile is closed to all accounts.
 	AllowList string `validate:"omitempty"`
 	// IdentifierTypes is a list of identifier types that may be issued under
-	// this profile. If none are specified, it defaults to "dns".
-	IdentifierTypes []identifier.IdentifierType `validate:"omitempty,dive,oneof=dns ip"`
+	// this profile.
+	IdentifierTypes []identifier.IdentifierType `validate:"required,dive,oneof=dns ip"`
 }
 
 // validationProfile holds the attributes of a given validation profile.
@@ -330,7 +318,7 @@ type validationProfile struct {
 	// nil, the profile is open to all accounts (everyone is allowed).
 	allowList *allowlist.List[int64]
 	// identifierTypes is a list of identifier types that may be issued under
-	// this profile. If none are specified, it defaults to "dns".
+	// this profile.
 	identifierTypes []identifier.IdentifierType
 }
 
@@ -384,22 +372,13 @@ func NewValidationProfiles(defaultName string, configs map[string]*ValidationPro
 			}
 		}
 
-		identifierTypes := config.IdentifierTypes
-		// If this profile has no identifier types configured, default to DNS.
-		// This default is temporary, to improve deployability.
-		//
-		// TODO(#8184): Remove this default and use config.IdentifierTypes below.
-		if len(identifierTypes) == 0 {
-			identifierTypes = []identifier.IdentifierType{identifier.TypeDNS}
-		}
-
 		profiles[name] = &validationProfile{
 			pendingAuthzLifetime: config.PendingAuthzLifetime.Duration,
 			validAuthzLifetime:   config.ValidAuthzLifetime.Duration,
 			orderLifetime:        config.OrderLifetime.Duration,
 			maxNames:             config.MaxNames,
 			allowList:            allowList,
-			identifierTypes:      identifierTypes,
+			identifierTypes:      config.IdentifierTypes,
 		}
 	}
 
@@ -536,16 +515,9 @@ func (ra *RegistrationAuthorityImpl) NewRegistration(ctx context.Context, reques
 		return nil, berrors.MalformedError("invalid public key: %s", err.Error())
 	}
 
-	// Check that contacts conform to our expectations.
-	err = ra.validateContacts(request.Contact)
-	if err != nil {
-		return nil, err
-	}
-
 	// Don't populate ID or CreatedAt because those will be set by the SA.
 	req := &corepb.Registration{
 		Key:       request.Key,
-		Contact:   request.Contact,
 		Agreement: request.Agreement,
 		Status:    string(core.StatusValid),
 	}
@@ -554,12 +526,6 @@ func (ra *RegistrationAuthorityImpl) NewRegistration(ctx context.Context, reques
 	res, err := ra.SA.NewRegistration(ctx, req)
 	if err != nil {
 		return nil, err
-	}
-
-	// TODO(#7966): Remove once the rate of registrations with contacts has been
-	// determined.
-	for range request.Contact {
-		ra.newOrUpdatedContactCounter.With(prometheus.Labels{"new": "true"}).Inc()
 	}
 
 	ra.newRegCounter.Inc()
@@ -594,7 +560,7 @@ func (ra *RegistrationAuthorityImpl) validateContacts(contacts []string) error {
 		}
 		parsed, err := url.Parse(contact)
 		if err != nil {
-			return berrors.InvalidEmailError("invalid contact")
+			return berrors.InvalidEmailError("unparsable contact")
 		}
 		if parsed.Scheme != "mailto" {
 			return berrors.UnsupportedContactError("only contact scheme 'mailto:' is supported")
@@ -1284,26 +1250,17 @@ func (ra *RegistrationAuthorityImpl) issueCertificateOuter(
 // account) and duplicate certificate rate limits. There is no reason to surface
 // errors from this function to the Subscriber, spends against these limit are
 // best effort.
-//
-// TODO(#7311): Handle IP address identifiers properly; don't just trust that
-// the value will always make sense in context.
 func (ra *RegistrationAuthorityImpl) countCertificateIssued(ctx context.Context, regId int64, orderIdents identifier.ACMEIdentifiers, isRenewal bool) {
-	names, err := orderIdents.ToDNSSlice()
-	if err != nil {
-		ra.log.Warningf("parsing identifiers at finalize: %s", err)
-		return
-	}
-
 	var transactions []ratelimits.Transaction
 	if !isRenewal {
-		txns, err := ra.txnBuilder.CertificatesPerDomainSpendOnlyTransactions(regId, names)
+		txns, err := ra.txnBuilder.CertificatesPerDomainSpendOnlyTransactions(regId, orderIdents)
 		if err != nil {
 			ra.log.Warningf("building rate limit transactions at finalize: %s", err)
 		}
 		transactions = append(transactions, txns...)
 	}
 
-	txn, err := ra.txnBuilder.CertificatesPerFQDNSetSpendOnlyTransaction(names)
+	txn, err := ra.txnBuilder.CertificatesPerFQDNSetSpendOnlyTransaction(orderIdents)
 	if err != nil {
 		ra.log.Warningf("building rate limit transaction at finalize: %s", err)
 	}
@@ -1417,35 +1374,6 @@ func (ra *RegistrationAuthorityImpl) getSCTs(ctx context.Context, precertDER []b
 	return scts, nil
 }
 
-// UpdateRegistrationContact updates an existing Registration's contact.
-// The updated contacts field may be empty.
-func (ra *RegistrationAuthorityImpl) UpdateRegistrationContact(ctx context.Context, req *rapb.UpdateRegistrationContactRequest) (*corepb.Registration, error) {
-	if core.IsAnyNilOrZero(req.RegistrationID) {
-		return nil, errIncompleteGRPCRequest
-	}
-
-	err := ra.validateContacts(req.Contacts)
-	if err != nil {
-		return nil, fmt.Errorf("invalid contact: %w", err)
-	}
-
-	update, err := ra.SA.UpdateRegistrationContact(ctx, &sapb.UpdateRegistrationContactRequest{
-		RegistrationID: req.RegistrationID,
-		Contacts:       req.Contacts,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to update registration contact: %w", err)
-	}
-
-	// TODO(#7966): Remove once the rate of registrations with contacts has
-	// been determined.
-	for range req.Contacts {
-		ra.newOrUpdatedContactCounter.With(prometheus.Labels{"new": "false"}).Inc()
-	}
-
-	return update, nil
-}
-
 // UpdateRegistrationKey updates an existing Registration's key.
 func (ra *RegistrationAuthorityImpl) UpdateRegistrationKey(ctx context.Context, req *rapb.UpdateRegistrationKeyRequest) (*corepb.Registration, error) {
 	if core.IsAnyNilOrZero(req.RegistrationID, req.Jwk) {
@@ -1492,11 +1420,8 @@ func (ra *RegistrationAuthorityImpl) recordValidation(ctx context.Context, authI
 
 // countFailedValidations increments the FailedAuthorizationsPerDomainPerAccount limit.
 // and the FailedAuthorizationsForPausingPerDomainPerAccountTransaction limit.
-//
-// TODO(#7311): Handle IP address identifiers properly; don't just trust that
-// the value will always make sense in context.
 func (ra *RegistrationAuthorityImpl) countFailedValidations(ctx context.Context, regId int64, ident identifier.ACMEIdentifier) error {
-	txn, err := ra.txnBuilder.FailedAuthorizationsPerDomainPerAccountSpendOnlyTransaction(regId, ident.Value)
+	txn, err := ra.txnBuilder.FailedAuthorizationsPerDomainPerAccountSpendOnlyTransaction(regId, ident)
 	if err != nil {
 		return fmt.Errorf("building rate limit transaction for the %s rate limit: %w", ratelimits.FailedAuthorizationsPerDomainPerAccount, err)
 	}
@@ -1507,7 +1432,7 @@ func (ra *RegistrationAuthorityImpl) countFailedValidations(ctx context.Context,
 	}
 
 	if features.Get().AutomaticallyPauseZombieClients {
-		txn, err = ra.txnBuilder.FailedAuthorizationsForPausingPerDomainPerAccountTransaction(regId, ident.Value)
+		txn, err = ra.txnBuilder.FailedAuthorizationsForPausingPerDomainPerAccountTransaction(regId, ident)
 		if err != nil {
 			return fmt.Errorf("building rate limit transaction for the %s rate limit: %w", ratelimits.FailedAuthorizationsForPausingPerDomainPerAccount, err)
 		}
@@ -1520,12 +1445,7 @@ func (ra *RegistrationAuthorityImpl) countFailedValidations(ctx context.Context,
 		if decision.Result(ra.clk.Now()) != nil {
 			resp, err := ra.SA.PauseIdentifiers(ctx, &sapb.PauseRequest{
 				RegistrationID: regId,
-				Identifiers: []*corepb.Identifier{
-					{
-						Type:  string(ident.Type),
-						Value: ident.Value,
-					},
-				},
+				Identifiers:    []*corepb.Identifier{ident.ToProto()},
 			})
 			if err != nil {
 				return fmt.Errorf("failed to pause %d/%q: %w", regId, ident.Value, err)
@@ -1542,11 +1462,8 @@ func (ra *RegistrationAuthorityImpl) countFailedValidations(ctx context.Context,
 
 // resetAccountPausingLimit resets bucket to maximum capacity for given account.
 // There is no reason to surface errors from this function to the Subscriber.
-//
-// TODO(#7311): Handle IP address identifiers properly; don't just trust that
-// the value will always make sense in context.
 func (ra *RegistrationAuthorityImpl) resetAccountPausingLimit(ctx context.Context, regId int64, ident identifier.ACMEIdentifier) {
-	bucketKey := ratelimits.NewRegIdDomainBucketKey(ratelimits.FailedAuthorizationsForPausingPerDomainPerAccount, regId, ident.Value)
+	bucketKey := ratelimits.NewRegIdIdentValueBucketKey(ratelimits.FailedAuthorizationsForPausingPerDomainPerAccount, regId, ident.Value)
 	err := ra.limiter.Reset(ctx, bucketKey)
 	if err != nil {
 		ra.log.Warningf("resetting bucket for regID=[%d] identifier=[%s]: %s", regId, ident.Value, err)
